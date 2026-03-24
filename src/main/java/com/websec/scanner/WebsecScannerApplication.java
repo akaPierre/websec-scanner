@@ -2,12 +2,14 @@ package com.websec.scanner;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.WebApplicationType;
 
 @SpringBootApplication
 public class WebsecScannerApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(WebsecScannerApplication.class, args);
+		SpringApplication app = new SpringApplication(WebsecScannerApplication.class);
+		app.setWebApplicationType(WebApplicationType.NONE);
+		app.run(args);
 	}
-
 }
