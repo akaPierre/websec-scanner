@@ -19,7 +19,7 @@ Ferramenta educativa de análise de vulnerabilidades para aplicações web.
 ## 🧱 Stack
 
 - Java 21
-- Spring Boot 3.4
+- Spring Boot 3.5.12
 - Maven
 - WebFlux (WebClient)
 - dnsjava
@@ -35,7 +35,7 @@ mvn -version    # Maven 3.9+
 
 ```bash
 # Clone o repositório
-git clone https://github.com/SEU_USUARIO/websec-scanner.git
+git clone https://github.com/akaPierre/websec-scanner.git
 cd websec-scanner
 
 # Build
