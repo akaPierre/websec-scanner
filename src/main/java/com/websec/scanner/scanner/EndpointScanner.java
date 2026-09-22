@@ -6,18 +6,18 @@ import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientException;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -64,71 +64,62 @@ public class EndpointScanner implements Scanner {
     }
 
     @Override
-    public List<Finding> scan(String target) {
-        List<Finding> findings = new ArrayList<>();
+    public Mono<List<Finding>> scan(String target) {
         List<String> endpoints = loadEndpoints();
-
         log.info("[{}] Testando {} endpoints em: {}", getName(), endpoints.size(), target);
 
-        for (String endpoint : endpoints) {
-            String url = normalizeTarget(target) + endpoint;
-            checkEndpoint(url, endpoint, findings);
-            sleepBetweenRequests();
-        }
+        Duration delay = Duration.ofMillis(Math.max(0, config.getEndpointDelayMs()));
 
-        return findings;
+        return Flux.fromIterable(endpoints)
+                .delayElements(delay)
+                .concatMap(endpoint -> checkEndpoint(normalizeTarget(target) + endpoint, endpoint))
+                .collectList();
     }
 
-    private void sleepBetweenRequests() {
-        int delay = config.getEndpointDelayMs();
-        if (delay <= 0) return;
-        try {
-            Thread.sleep(delay);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+    private Mono<Finding> checkEndpoint(String url, String endpoint) {
+        return webClient
+                .method(HttpMethod.GET)
+                .uri(url)
+                // exchangeToMono (not retrieve()) is required here: retrieve()
+                // throws WebClientResponseException for any 4xx/5xx status by
+                // default, which would swallow the 403 case below as an error
+                // before it ever reached the status check.
+                .exchangeToMono(response -> {
+                    int statusCode = response.statusCode().value();
+
+                    boolean resourceExists = statusCode == 200
+                            || statusCode == 201
+                            || statusCode == 301
+                            || statusCode == 302
+                            || statusCode == 403;
+
+                    Mono<Finding> finding = resourceExists
+                            ? Mono.just(buildFinding(url, endpoint, statusCode))
+                            : Mono.empty();
+
+                    return response.releaseBody().then(finding);
+                })
+                .onErrorResume(e -> {
+                    log.debug("[{}] Endpoint inacessível: {} → {}", getName(), url, e.getMessage());
+                    return Mono.empty();
+                });
     }
 
-    private void checkEndpoint(String url, String endpoint, List<Finding> findings) {
-        try {
-            var response = webClient
-                    .method(HttpMethod.GET)
-                    .uri(url)
-                    .retrieve()
-                    .toBodilessEntity()
-                    .onErrorResume(e -> Mono.empty())
-                    .block();
+    private Finding buildFinding(String url, String endpoint, int statusCode) {
+        Severity severity = ENDPOINT_SEVERITY.getOrDefault(endpoint, Severity.LOW);
+        String statusDescription = describeStatus(statusCode);
 
-            if (response == null) return;
+        log.info("[{}] Endpoint encontrado: {} → HTTP {}", getName(), url, statusCode);
 
-            int statusCode = response.getStatusCode().value();
-
-            boolean resourceExists = statusCode == 200
-                    || statusCode == 201
-                    || statusCode == 301
-                    || statusCode == 302
-                    || statusCode == 403;
-
-            if (resourceExists) {
-                Severity severity = ENDPOINT_SEVERITY.getOrDefault(endpoint, Severity.LOW);
-                String statusDescription = describeStatus(statusCode);
-
-                log.info("[{}] Endpoint encontrado: {} → HTTP {}", getName(), url, statusCode);
-
-                findings.add(Finding.builder()
-                        .type(FindingType.ENDPOINT)
-                        .severity(severity)
-                        .title("Endpoint sensível acessível: " + endpoint)
-                        .description(getEndpointDescription(endpoint, statusCode))
-                        .evidence("GET " + url + " → HTTP " + statusCode + " " + statusDescription)
-                        .recommendation(getEndpointRecommendation(endpoint))
-                        .target(url)
-                        .build());
-            }
-
-        } catch (WebClientException e) {
-            log.debug("[{}] Endpoint inacessível: {} → {}", getName(), url, e.getMessage());
-        }
+        return Finding.builder()
+                .type(FindingType.ENDPOINT)
+                .severity(severity)
+                .title("Endpoint sensível acessível: " + endpoint)
+                .description(getEndpointDescription(endpoint, statusCode))
+                .evidence("GET " + url + " → HTTP " + statusCode + " " + statusDescription)
+                .recommendation(getEndpointRecommendation(endpoint))
+                .target(url)
+                .build();
     }
 
     private List<String> loadEndpoints() {

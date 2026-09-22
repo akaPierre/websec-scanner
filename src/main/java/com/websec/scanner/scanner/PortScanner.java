@@ -4,25 +4,41 @@ import com.websec.scanner.config.ScannerConfig;
 import com.websec.scanner.model.Finding;
 import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class PortScanner implements Scanner {
 
-    private final ScannerConfig config;
+    private static final int SCAN_CONCURRENCY = 10;
 
-    private static final Map<Integer, String> TARGET_PORTS = new LinkedHashMap<>() {{
+    private final ScannerConfig config;
+    private final Map<Integer, String> targetPorts;
+
+    @Autowired
+    public PortScanner(ScannerConfig config) {
+        this(config, DEFAULT_TARGET_PORTS);
+    }
+
+    // Visible for tests: lets a test scan a controlled port instead of the
+    // fixed well-known ports below (several of which need root to bind on Linux).
+    PortScanner(ScannerConfig config, Map<Integer, String> targetPorts) {
+        this.config = config;
+        this.targetPorts = targetPorts;
+    }
+
+    private static final Map<Integer, String> DEFAULT_TARGET_PORTS = new LinkedHashMap<>() {{
         put(21,   "FTP - Transferência de arquivos (sem criptografia)");
         put(22,   "SSH - Acesso remoto seguro");
         put(23,   "Telnet - Acesso remoto SEM criptografia");
@@ -58,40 +74,42 @@ public class PortScanner implements Scanner {
     }
 
     @Override
-    public List<Finding> scan(String target) {
+    public Mono<List<Finding>> scan(String target) {
         String host = extractHost(target);
-        List<Finding> findings = new ArrayList<>();
-
         log.info("[{}] Escaneando portas de: {}", getName(), host);
 
-        for (Map.Entry<Integer, String> entry : TARGET_PORTS.entrySet()) {
-            int port = entry.getKey();
-            String service = entry.getValue();
+        return Flux.fromIterable(targetPorts.entrySet())
+                .flatMap(entry -> checkPort(host, entry.getKey(), entry.getValue()), SCAN_CONCURRENCY)
+                .collectList()
+                .doOnNext(findings -> {
+                    if (findings.isEmpty()) {
+                        log.info("[{}] Nenhuma porta sensível encontrada em: {}", getName(), host);
+                    }
+                });
+    }
 
-            if (isPortOpen(host, port)) {
-                log.info("[{}] Porta aberta: {}:{}", getName(), host, port);
+    private Mono<Finding> checkPort(String host, int port, String service) {
+        return Mono.fromCallable(() -> isPortOpen(host, port))
+                .subscribeOn(Schedulers.boundedElastic())
+                .mapNotNull(open -> {
+                    if (!open) {
+                        log.debug("[{}] Porta fechada: {}:{}", getName(), host, port);
+                        return null;
+                    }
 
-                Severity severity = PORT_SEVERITY.getOrDefault(port, Severity.INFO);
+                    log.info("[{}] Porta aberta: {}:{}", getName(), host, port);
+                    Severity severity = PORT_SEVERITY.getOrDefault(port, Severity.INFO);
 
-                findings.add(Finding.builder()
-                        .type(FindingType.PORT)
-                        .severity(severity)
-                        .title("Porta aberta: " + port + " (" + extractServiceName(service) + ")")
-                        .description("A porta " + port + " está acessível publicamente. Serviço: " + service)
-                        .evidence(host + ":" + port + " → OPEN")
-                        .recommendation(getPortRecommendation(port))
-                        .target(host)
-                        .build());
-            } else {
-                log.debug("[{}] Porta fechada: {}:{}", getName(), host, port);
-            }
-        }
-
-        if (findings.isEmpty()) {
-            log.info("[{}] Nenhuma porta sensível encontrada em: {}", getName(), host);
-        }
-
-        return findings;
+                    return Finding.builder()
+                            .type(FindingType.PORT)
+                            .severity(severity)
+                            .title("Porta aberta: " + port + " (" + extractServiceName(service) + ")")
+                            .description("A porta " + port + " está acessível publicamente. Serviço: " + service)
+                            .evidence(host + ":" + port + " → OPEN")
+                            .recommendation(getPortRecommendation(port))
+                            .target(host)
+                            .build();
+                });
     }
 
     private boolean isPortOpen(String host, int port) {

@@ -7,11 +7,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,74 +47,75 @@ public class FingerprintScanner implements Scanner {
     }
 
     @Override
-    public List<Finding> scan(String target) {
-        List<Finding> findings = new ArrayList<>();
+    public Mono<List<Finding>> scan(String target) {
         log.info("[{}] Identificando tecnologias em: {}", getName(), target);
 
-        try {
-            ResponseEntity<Void> response = webClient
-                    .method(HttpMethod.GET)
-                    .uri(target)
-                    .retrieve()
-                    .toBodilessEntity()
-                    .onErrorResume(e -> Mono.empty())
-                    .block();
+        return webClient
+                .method(HttpMethod.GET)
+                .uri(target)
+                // exchangeToMono (not retrieve()) is required here: retrieve()
+                // throws for any 4xx/5xx status by default, which would skip
+                // fingerprinting entirely on WAF blocks or error pages.
+                .exchangeToMono(response -> {
+                    List<Finding> findings = buildFindings(response.headers().asHttpHeaders(), target);
+                    return response.releaseBody().thenReturn(findings);
+                })
+                .onErrorResume(e -> {
+                    log.warn("[{}] Erro ao analisar {}: {}", getName(), target, e.getMessage());
+                    return Mono.just(List.of());
+                });
+    }
 
-            if (response == null) return findings;
+    private List<Finding> buildFindings(HttpHeaders headers, String target) {
+        List<Finding> findings = new ArrayList<>();
 
-            var headers = response.getHeaders();
-
-            HEADER_FINGERPRINTS.forEach((headerName, tech) -> {
-                List<String> values = headers.get(headerName);
-                if (values != null && !values.isEmpty()) {
-                    findings.add(buildFingerprintFinding(
-                            target, tech, headerName + ": " + values.get(0)
-                    ));
-                }
-            });
-
-            List<String> cookies = headers.get("Set-Cookie");
-            if (cookies != null) {
-                for (String cookie : cookies) {
-                    COOKIE_FINGERPRINTS.forEach((cookieName, tech) -> {
-                        if (cookie.toLowerCase().contains(cookieName.toLowerCase())) {
-                            findings.add(buildFingerprintFinding(
-                                    target, tech, "Cookie detectado: " + cookieName
-                            ));
-                        }
-                    });
-                }
+        HEADER_FINGERPRINTS.forEach((headerName, tech) -> {
+            List<String> values = headers.get(headerName);
+            if (values != null && !values.isEmpty()) {
+                findings.add(buildFingerprintFinding(
+                        target, tech, headerName + ": " + values.get(0)
+                ));
             }
+        });
 
-            List<String> serverHeader = headers.get("Server");
-            if (serverHeader != null && !serverHeader.isEmpty()) {
-                String serverValue = serverHeader.get(0);
-                findings.add(Finding.builder()
-                        .type(FindingType.FINGERPRINT)
-                        .severity(Severity.INFO)
-                        .title("Tecnologia identificada via header Server")
-                        .description("O servidor identificou-se como: " + serverValue)
-                        .evidence("Server: " + serverValue)
-                        .recommendation("Oculte ou generalize o header 'Server' para dificultar reconhecimento.")
-                        .target(target)
-                        .build());
+        List<String> cookies = headers.get("Set-Cookie");
+        if (cookies != null) {
+            for (String cookie : cookies) {
+                COOKIE_FINGERPRINTS.forEach((cookieName, tech) -> {
+                    if (cookie.toLowerCase().contains(cookieName.toLowerCase())) {
+                        findings.add(buildFingerprintFinding(
+                                target, tech, "Cookie detectado: " + cookieName
+                        ));
+                    }
+                });
             }
+        }
 
-            List<String> poweredBy = headers.get("X-Powered-By");
-            if (poweredBy != null && !poweredBy.isEmpty()) {
-                findings.add(Finding.builder()
-                        .type(FindingType.FINGERPRINT)
-                        .severity(Severity.LOW)
-                        .title("Tecnologia de backend identificada via X-Powered-By")
-                        .description("O header X-Powered-By revela a tecnologia do servidor.")
-                        .evidence("X-Powered-By: " + poweredBy.get(0))
-                        .recommendation("Remova o header X-Powered-By. No Spring Boot: server.server-header='' no application.properties.")
-                        .target(target)
-                        .build());
-            }
+        List<String> serverHeader = headers.get("Server");
+        if (serverHeader != null && !serverHeader.isEmpty()) {
+            String serverValue = serverHeader.get(0);
+            findings.add(Finding.builder()
+                    .type(FindingType.FINGERPRINT)
+                    .severity(Severity.INFO)
+                    .title("Tecnologia identificada via header Server")
+                    .description("O servidor identificou-se como: " + serverValue)
+                    .evidence("Server: " + serverValue)
+                    .recommendation("Oculte ou generalize o header 'Server' para dificultar reconhecimento.")
+                    .target(target)
+                    .build());
+        }
 
-        } catch (WebClientException e) {
-            log.warn("[{}] Erro ao analisar {}: {}", getName(), target, e.getMessage());
+        List<String> poweredBy = headers.get("X-Powered-By");
+        if (poweredBy != null && !poweredBy.isEmpty()) {
+            findings.add(Finding.builder()
+                    .type(FindingType.FINGERPRINT)
+                    .severity(Severity.LOW)
+                    .title("Tecnologia de backend identificada via X-Powered-By")
+                    .description("O header X-Powered-By revela a tecnologia do servidor.")
+                    .evidence("X-Powered-By: " + poweredBy.get(0))
+                    .recommendation("Remova o header X-Powered-By. No Spring Boot: server.server-header='' no application.properties.")
+                    .target(target)
+                    .build());
         }
 
         return findings;

@@ -6,7 +6,9 @@ import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpMethod;
@@ -16,20 +18,21 @@ import org.xbill.DNS.Lookup;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.Type;
 import org.xbill.DNS.TextParseException;
-import org.xbill.DNS.lookup.LookupSession;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.*;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class SubdomainScanner implements Scanner {
+public class SubdomainScanner {
+
+    private static final int RESOLVE_CONCURRENCY = 10;
 
     private final WebClient webClient;
     private final ScannerConfig config;
@@ -56,14 +59,8 @@ public class SubdomainScanner implements Scanner {
             "the site you were looking for doesn't exist"
     );
 
-    @Override
     public String getName() {
         return "Subdomain Scanner";
-    }
-
-    @Override
-    public List<Finding> scan(String target) {
-        return new ArrayList<>();
     }
 
     public List<String> discoverHosts(String domain) {
@@ -71,65 +68,49 @@ public class SubdomainScanner implements Scanner {
     }
 
     public List<String> discoverHostsWithFindings(String domain, List<Finding> findings) {
-        List<String> activeHosts = new ArrayList<>();
         List<String> wordlist = loadSubdomainWordlist();
-
         int limit = Math.min(wordlist.size(), config.getMaxSubdomains());
-        List<String> candidates = wordlist.subList(0, limit);
 
-        log.info("[{}] Testando {} subdomínios para: {}", getName(), candidates.size(), domain);
+        List<String> candidateHosts = new ArrayList<>(wordlist.subList(0, limit).stream()
+                .map(prefix -> prefix + "." + domain)
+                .toList());
+        candidateHosts.add(domain);
 
-        ExecutorService executor = Executors.newFixedThreadPool(10);
-        List<Future<SubdomainResult>> futures = new ArrayList<>();
+        log.info("[{}] Testando {} subdomínios para: {}", getName(), candidateHosts.size(), domain);
 
-        for (String prefix : candidates) {
-            String subdomain = prefix + "." + domain;
-            futures.add(executor.submit(() -> checkSubdomain(subdomain)));
-        }
+        List<SubdomainResult> results = Flux.fromIterable(candidateHosts)
+                .flatMap(host -> Mono.fromCallable(() -> checkSubdomain(host))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .onErrorResume(e -> Mono.empty()), RESOLVE_CONCURRENCY)
+                .collectList()
+                .blockOptional(Duration.ofSeconds(90))
+                .orElse(List.of());
 
-        futures.add(executor.submit(() -> checkSubdomain(domain)));
+        List<String> activeHosts = new ArrayList<>();
 
-        executor.shutdown();
-        try {
-            executor.awaitTermination(60, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("[{}] Timeout aguardando threads de subdomain", getName());
-        }
+        for (SubdomainResult result : results) {
+            if (!result.isActive()) continue;
 
-        for (Future<SubdomainResult> future : futures) {
-            try {
-                SubdomainResult result = future.get(5, TimeUnit.SECONDS);
-                if (result == null) continue;
+            log.info("[{}] Subdomínio ativo: {}", getName(), result.getHost());
+            activeHosts.add(result.getPreferredUrl());
 
-                if (result.isActive()) {
-                    log.info("[{}] Subdomínio ativo: {}", getName(), result.getHost());
-                    activeHosts.add(result.getPreferredUrl());
+            if (!result.getHost().equals(domain)) {
+                findings.add(Finding.builder()
+                        .type(FindingType.SUBDOMAIN)
+                        .severity(Severity.INFO)
+                        .title("Subdomínio ativo descoberto: " + result.getHost())
+                        .description("O subdomínio está ativo e acessível via " +
+                                (result.isHttps() ? "HTTPS" : "HTTP") + ".")
+                        .evidence("DNS resolveu para: " + result.getResolvedIp() +
+                                " | HTTP " + result.getStatusCode())
+                        .recommendation("Certifique-se de que este subdomínio está autorizado " +
+                                "e possui os mesmos controles de segurança do domínio principal.")
+                        .target(result.getPreferredUrl())
+                        .build());
+            }
 
-                    if (!result.getHost().equals(domain)) {
-                        findings.add(Finding.builder()
-                                .type(FindingType.SUBDOMAIN)
-                                .severity(Severity.INFO)
-                                .title("Subdomínio ativo descoberto: " + result.getHost())
-                                .description("O subdomínio está ativo e acessível via " +
-                                        (result.isHttps() ? "HTTPS" : "HTTP") + ".")
-                                .evidence("DNS resolveu para: " + result.getResolvedIp() +
-                                        " | HTTP " + result.getStatusCode())
-                                .recommendation("Certifique-se de que este subdomínio está autorizado " +
-                                        "e possui os mesmos controles de segurança do domínio principal.")
-                                .target(result.getPreferredUrl())
-                                .build());
-                    }
-
-                    if (result.getCname() != null) {
-                        checkTakeover(result, findings);
-                    }
-                }
-
-            } catch (TimeoutException e) {
-                log.debug("[{}] Timeout ao verificar subdomínio", getName());
-            } catch (Exception e) {
-                log.debug("[{}] Erro ao processar resultado: {}", getName(), e.getMessage());
+            if (result.getCname() != null) {
+                checkTakeover(result, findings);
             }
         }
 
@@ -148,7 +129,6 @@ public class SubdomainScanner implements Scanner {
         }
 
         result.setCname(resolveCname(host));
-
         result.setActive(false);
 
         Integer httpsStatus = tryRequest("https://" + host);

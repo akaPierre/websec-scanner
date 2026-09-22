@@ -9,7 +9,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientException;
+import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,7 +19,7 @@ import java.util.Map;
 @Component
 @RequiredArgsConstructor
 public class HeaderScanner implements Scanner {
-    
+
     private final WebClient webClient;
 
     private static final Map<String, Severity> SECURITY_HEADERS = Map.of(
@@ -37,44 +37,48 @@ public class HeaderScanner implements Scanner {
     }
 
     @Override
-    public List<Finding> scan(String target) {
-        List<Finding> findings = new ArrayList<>();
+    public Mono<List<Finding>> scan(String target) {
         log.info("[{}] Analisando headers de: {}", getName(), target);
 
-        try {
-            HttpHeaders headers = webClient
-                    .method(HttpMethod.GET)
-                    .uri(target)
-                    .retrieve()
-                    .toBodilessEntity()
-                    .map(response -> response.getHeaders())
-                    .onErrorReturn(HttpHeaders.EMPTY)
-                    .block();
+        return webClient
+                .method(HttpMethod.GET)
+                .uri(target)
+                // exchangeToMono (not retrieve()) is required here: retrieve()
+                // throws for any 4xx/5xx status by default, which would skip
+                // header analysis entirely on WAF blocks or error pages.
+                .exchangeToMono(response -> {
+                    List<Finding> findings = buildFindings(response.headers().asHttpHeaders(), target);
+                    return response.releaseBody().thenReturn(findings);
+                })
+                .onErrorResume(e -> {
+                    log.warn("[{}] Erro ao conectar em {}: {}", getName(), target, e.getMessage());
+                    return Mono.just(List.of());
+                });
+    }
 
-            if (headers == null || headers.isEmpty()) {
-                log.warn("[{}] Não foi possível obter headers de: {}", getName(), target);
-                return findings;
-            }
+    private List<Finding> buildFindings(HttpHeaders headers, String target) {
+        List<Finding> findings = new ArrayList<>();
 
-            SECURITY_HEADERS.forEach((headerName, severity) -> {
-                if (!headers.containsKey(headerName)) {
-                    findings.add(Finding.builder()
-                            .type(FindingType.HEADER)
-                            .severity(severity)
-                            .title("Header de segurança ausente: " + headerName)
-                            .description("O header '" + headerName + "' não está presente na resposta HTTP.")
-                            .evidence("Header não encontrado na resposta de: " + target)
-                            .recommendation(getRecommendation(headerName))
-                            .target(target)
-                            .build());
-                }
-            });
-
-            checkExposedHeaders(headers, target, findings);
-        } catch (WebClientException e) {
-            log.warn("[{}] Erro ao conectar em {}: {}", getName(), target, e.getMessage());
+        if (headers == null || headers.isEmpty()) {
+            log.warn("[{}] Não foi possível obter headers de: {}", getName(), target);
+            return findings;
         }
 
+        SECURITY_HEADERS.forEach((headerName, severity) -> {
+            if (!headers.containsKey(headerName)) {
+                findings.add(Finding.builder()
+                        .type(FindingType.HEADER)
+                        .severity(severity)
+                        .title("Header de segurança ausente: " + headerName)
+                        .description("O header '" + headerName + "' não está presente na resposta HTTP.")
+                        .evidence("Header não encontrado na resposta de: " + target)
+                        .recommendation(getRecommendation(headerName))
+                        .target(target)
+                        .build());
+            }
+        });
+
+        checkExposedHeaders(headers, target, findings);
         return findings;
     }
 

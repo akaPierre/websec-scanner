@@ -6,6 +6,8 @@ import com.websec.scanner.scanner.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -15,6 +17,8 @@ import java.util.List;
 @Component
 @RequiredArgsConstructor
 public class ScanEngine {
+
+    private static final int HOST_CONCURRENCY = 5;
 
     private final SubdomainScanner subdomainScanner;
     private final HeaderScanner headerScanner;
@@ -39,17 +43,11 @@ public class ScanEngine {
 
         log.info("[Engine] {} hosts ativos para análise", activeHosts.size());
 
-        log.info("[Engine] FASE 2 — Análise de cada host");
-        for (String host : activeHosts) {
-            log.info("[Engine] ▶ Analisando: {}", host);
-            allFindings.addAll(httpScanner.scan(host));
-            allFindings.addAll(headerScanner.scan(host));
-            allFindings.addAll(endpointScanner.scan(host));
-            allFindings.addAll(fingerprintScanner.scan(host));
-        }
+        log.info("[Engine] FASE 2 — Análise de cada host (concorrente)");
+        allFindings.addAll(scanHosts(activeHosts));
 
         log.info("[Engine] FASE 3 — Scan de portas em: {}", domain);
-        allFindings.addAll(portScanner.scan(domain));
+        allFindings.addAll(portScanner.scan(domain).block());
 
         long duration = Instant.now().toEpochMilli() - startTime;
 
@@ -67,5 +65,33 @@ public class ScanEngine {
         log.info("========================================");
 
         return report;
+    }
+
+    private List<Finding> scanHosts(List<String> activeHosts) {
+        return Flux.fromIterable(activeHosts)
+                .flatMap(this::scanSingleHost, HOST_CONCURRENCY)
+                .collectList()
+                .map(perHostFindings -> perHostFindings.stream()
+                        .flatMap(List::stream)
+                        .toList())
+                .block();
+    }
+
+    private Mono<List<Finding>> scanSingleHost(String host) {
+        log.info("[Engine] ▶ Analisando: {}", host);
+
+        return Mono.zip(
+                httpScanner.scan(host),
+                headerScanner.scan(host),
+                endpointScanner.scan(host),
+                fingerprintScanner.scan(host)
+        ).map(results -> {
+            List<Finding> merged = new ArrayList<>();
+            merged.addAll(results.getT1());
+            merged.addAll(results.getT2());
+            merged.addAll(results.getT3());
+            merged.addAll(results.getT4());
+            return merged;
+        });
     }
 }
