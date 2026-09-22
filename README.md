@@ -27,7 +27,7 @@ An educational web application vulnerability scanner.
 - Java 21
 - Spring Boot 3.5.12
 - Maven
-- WebFlux (WebClient)
+- WebFlux (WebClient) — fully non-blocking scanner pipelines built on Project Reactor: per-host scanners run concurrently via `Mono.zip`, multiple hosts run concurrently via `flatMap`, and blocking work (DNS resolution, raw TCP sockets) is bridged in through `Schedulers.boundedElastic()`
 - dnsjava
 
 ## ⚙️ Prerequisites
@@ -70,6 +70,8 @@ docker run --rm -v "$(pwd)/reports:/app/reports" websec-scanner scanme.nmap.org
 ```bash
 ./mvnw test
 ```
+
+Scanner modules are covered with [MockWebServer](https://github.com/square/okhttp/tree/master/mockwebserver)-backed unit tests (`src/test/java/com/websec/scanner/scanner`).
 
 ## 📊 Report structure
 
