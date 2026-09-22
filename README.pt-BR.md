@@ -4,23 +4,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
 
-🇺🇸 English | **[🇧🇷 Ler em Português](README.pt-BR.md)**
+**[🇺🇸 Read in English](README.md)** | 🇧🇷 Português
 
-An educational web application vulnerability scanner.
+Ferramenta educativa de análise de vulnerabilidades para aplicações web.
 
-> ⚠️ **Use only against systems you have explicit authorization to test.**
-> Unauthorized use is illegal and unethical.
+> ⚠️ **Use apenas em sistemas que você possui autorização explícita para testar.**
+> O uso não autorizado é ilegal e antiético.
 
-## 🚀 Features
+## 🚀 Funcionalidades
 
-- 🔍 Subdomain discovery via DNS
-- 🛡️ HTTP security header checks
-- 🔒 HTTPS and SSL certificate analysis
-- 🚪 Sensitive port scanning (TCP)
-- 📂 Exposed endpoint detection
-- 🧬 Technology fingerprinting
-- ☠️ Basic subdomain takeover detection
-- 📊 JSON report + colorized terminal output
+- 🔍 Descoberta de subdomínios via DNS
+- 🛡️ Verificação de headers de segurança HTTP
+- 🔒 Análise de HTTPS e certificado SSL
+- 🚪 Scan de portas sensíveis (TCP)
+- 📂 Detecção de endpoints expostos
+- 🧬 Fingerprinting de tecnologias
+- ☠️ Detecção básica de subdomain takeover
+- 📊 Relatório em JSON + terminal colorido
 
 ## 🧱 Stack
 
@@ -30,48 +30,48 @@ An educational web application vulnerability scanner.
 - WebFlux (WebClient)
 - dnsjava
 
-## ⚙️ Prerequisites
+## ⚙️ Pré-requisitos
 
 ```bash
 java -version   # Java 21+
 mvn -version    # Maven 3.9+
 ```
 
-## 🏃 Running it
+## 🏃 Como executar
 
 ```bash
-# Clone the repository
+# Clone o repositório
 git clone https://github.com/akaPierre/websec-scanner.git
 cd websec-scanner
 
 # Build
 mvn clean package -DskipTests
 
-# Interactive mode
+# Modo interativo
 java -jar target/websec-scanner-1.0.0.jar
 
-# Direct mode
+# Modo direto
 java -jar target/websec-scanner-1.0.0.jar scanme.nmap.org
 
-# Or via script
+# Ou via script
 chmod +x run.sh
 ./run.sh scanme.nmap.org
 ```
 
-## 🐳 Running with Docker
+## 🐳 Executar com Docker
 
 ```bash
 docker build -t websec-scanner .
 docker run --rm -v "$(pwd)/reports:/app/reports" websec-scanner scanme.nmap.org
 ```
 
-## 🧪 Tests
+## 🧪 Testes
 
 ```bash
 ./mvnw test
 ```
 
-## 📊 Report structure
+## 📊 Estrutura do Relatório
 
 ```json
 {
@@ -89,7 +89,7 @@ docker run --rm -v "$(pwd)/reports:/app/reports" websec-scanner scanme.nmap.org
     {
       "type": "HEADER",
       "severity": "HIGH",
-      "title": "Missing security header: Content-Security-Policy",
+      "title": "Header de segurança ausente: Content-Security-Policy",
       "description": "...",
       "evidence": "...",
       "recommendation": "...",
@@ -99,22 +99,22 @@ docker run --rm -v "$(pwd)/reports:/app/reports" websec-scanner scanme.nmap.org
 }
 ```
 
-## 📁 Project structure
+## 📁 Estrutura do Projeto
 
 ```
 websec-scanner/
 ├── src/main/java/com/websec/scanner/
-│   ├── cli/           # CLI interface
-│   ├── engine/        # Scan orchestrator
-│   ├── scanner/       # Analysis modules
-│   ├── model/         # POJOs and enums
-│   ├── report/        # Report generation
-│   └── config/        # Configuration
+│   ├── cli/           # Interface CLI
+│   ├── engine/        # Orquestrador do scan
+│   ├── scanner/       # Módulos de análise
+│   ├── model/         # POJOs e enums
+│   ├── report/        # Geração de relatório
+│   └── config/        # Configurações
 └── src/main/resources/
     ├── application.properties
-    └── wordlists/     # Subdomains and endpoints
+    └── wordlists/     # Subdomínios e endpoints
 ```
 
-## 📜 License
+## 📜 Licença
 
-MIT — for educational purposes only. See [LICENSE](LICENSE).
+MIT — apenas para fins educacionais. Veja [LICENSE](LICENSE).
