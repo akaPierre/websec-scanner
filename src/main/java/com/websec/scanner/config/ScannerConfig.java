@@ -15,6 +15,9 @@ public class ScannerConfig {
     @Value("${scanner.subdomain.max:50}")
     private int maxSubdomains;
 
+    @Value("${scanner.endpoint.delay:200}")
+    private int endpointDelayMs;
+
     @Value("${scanner.http.user-agent:WebSec-Scanner/1.0 (Educational Tool)}")
     private String userAgent;
 
@@ -24,6 +27,7 @@ public class ScannerConfig {
     public int getHttpTimeoutMs()    { return httpTimeoutMs; }
     public int getPortTimeoutMs()    { return portTimeoutMs; }
     public int getMaxSubdomains()    { return maxSubdomains; }
+    public int getEndpointDelayMs()  { return endpointDelayMs; }
     public String getUserAgent()     { return userAgent; }
     public String getReportOutputDir() { return reportOutputDir; }
 }

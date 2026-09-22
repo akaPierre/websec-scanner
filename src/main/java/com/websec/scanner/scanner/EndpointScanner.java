@@ -1,5 +1,6 @@
 package com.websec.scanner.scanner;
 
+import com.websec.scanner.config.ScannerConfig;
 import com.websec.scanner.model.Finding;
 import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
@@ -27,6 +28,7 @@ import java.util.Map;
 public class EndpointScanner implements Scanner {
 
     private final WebClient webClient;
+    private final ScannerConfig config;
 
     private static final Map<String, Severity> ENDPOINT_SEVERITY = Map.ofEntries(
             Map.entry("/.git",                Severity.HIGH),
@@ -71,9 +73,20 @@ public class EndpointScanner implements Scanner {
         for (String endpoint : endpoints) {
             String url = normalizeTarget(target) + endpoint;
             checkEndpoint(url, endpoint, findings);
+            sleepBetweenRequests();
         }
 
         return findings;
+    }
+
+    private void sleepBetweenRequests() {
+        int delay = config.getEndpointDelayMs();
+        if (delay <= 0) return;
+        try {
+            Thread.sleep(delay);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void checkEndpoint(String url, String endpoint, List<Finding> findings) {
