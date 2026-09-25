@@ -15,6 +15,10 @@ Ferramenta educativa de análise de vulnerabilidades para aplicações web.
 
 - 🔍 Descoberta de subdomínios via DNS
 - 🛡️ Verificação de headers de segurança HTTP
+- 🍪 Verificação de flags de segurança de cookies (Secure, HttpOnly, SameSite)
+- 🌐 Detecção de CORS mal configurado (origem refletida, credenciais)
+- 🔑 Detecção de JWT com algoritmo fraco (`alg: none`)
+- ↪️ Detecção de possível open redirect
 - 🔒 Análise de HTTPS e certificado SSL
 - 🚪 Scan de portas sensíveis (TCP)
 - 📂 Detecção de endpoints expostos

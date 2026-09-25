@@ -15,6 +15,10 @@ An educational web application vulnerability scanner.
 
 - 🔍 Subdomain discovery via DNS
 - 🛡️ HTTP security header checks
+- 🍪 Cookie security flags (Secure, HttpOnly, SameSite)
+- 🌐 CORS misconfiguration detection (reflected origin, credentials)
+- 🔑 JWT weak-algorithm detection (`alg: none`)
+- ↪️ Open redirect probing
 - 🔒 HTTPS and SSL certificate analysis
 - 🚪 Sensitive port scanning (TCP)
 - 📂 Exposed endpoint detection
