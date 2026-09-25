@@ -6,5 +6,9 @@ public enum FindingType {
     PORT,
     ENDPOINT,
     FINGERPRINT,
-    SUBDOMAIN
+    SUBDOMAIN,
+    COOKIE,
+    CORS,
+    JWT,
+    REDIRECT
 }

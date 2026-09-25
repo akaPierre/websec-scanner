@@ -221,6 +221,10 @@ public class ScannerCLI implements CommandLineRunner {
                 "    • Endpoints sensíveis (/admin, /.env...)\n" +
                 "    • Tecnologias expostas (fingerprinting)\n" +
                 "    • Possível subdomain takeover\n" +
+                "    • Cookies sem Secure/HttpOnly/SameSite\n" +
+                "    • Configuração de CORS (origem refletida, credenciais)\n" +
+                "    • Tokens JWT com algoritmo 'none'\n" +
+                "    • Possível open redirect\n" +
                 "\n  RELATÓRIOS:\n" +
                 "    Salvos automaticamente em: ./reports/\n" +
                 "    Formato: JSON estruturado\n"

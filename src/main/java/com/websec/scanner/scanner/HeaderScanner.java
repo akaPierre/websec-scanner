@@ -79,7 +79,56 @@ public class HeaderScanner implements Scanner {
         });
 
         checkExposedHeaders(headers, target, findings);
+        checkCookieFlags(headers, target, findings);
         return findings;
+    }
+
+    // Package-private so tests can exercise the Secure-flag branch directly
+    // against an "https://" target without needing a real TLS handshake.
+    void checkCookieFlags(HttpHeaders headers, String target, List<Finding> findings) {
+        List<String> cookies = headers.get(HttpHeaders.SET_COOKIE);
+        if (cookies == null) return;
+
+        boolean isHttps = target.startsWith("https://");
+
+        for (String cookie : cookies) {
+            String cookieName = cookie.split("=", 2)[0].trim();
+            String lower = cookie.toLowerCase();
+
+            if (isHttps && !lower.contains("secure")) {
+                findings.add(cookieFinding(target, cookieName, "Secure", Severity.MEDIUM,
+                        "O cookie '" + cookieName + "' não possui o atributo Secure, podendo ser " +
+                                "transmitido em uma conexão HTTP não criptografada.",
+                        "Adicione o atributo 'Secure' para garantir que o cookie só seja enviado via HTTPS."));
+            }
+
+            if (!lower.contains("httponly")) {
+                findings.add(cookieFinding(target, cookieName, "HttpOnly", Severity.MEDIUM,
+                        "O cookie '" + cookieName + "' não possui o atributo HttpOnly, podendo ser " +
+                                "acessado via JavaScript (risco de roubo em ataques XSS).",
+                        "Adicione o atributo 'HttpOnly' para impedir acesso ao cookie via JavaScript."));
+            }
+
+            if (!lower.contains("samesite")) {
+                findings.add(cookieFinding(target, cookieName, "SameSite", Severity.LOW,
+                        "O cookie '" + cookieName + "' não possui o atributo SameSite, ficando mais " +
+                                "exposto a ataques CSRF.",
+                        "Adicione o atributo 'SameSite=Strict' ou 'SameSite=Lax' ao cookie."));
+            }
+        }
+    }
+
+    private Finding cookieFinding(String target, String cookieName, String missingAttribute,
+                                   Severity severity, String description, String recommendation) {
+        return Finding.builder()
+                .type(FindingType.COOKIE)
+                .severity(severity)
+                .title("Cookie sem atributo " + missingAttribute + ": " + cookieName)
+                .description(description)
+                .evidence("Set-Cookie: " + cookieName + " (sem " + missingAttribute + ")")
+                .recommendation(recommendation)
+                .target(target)
+                .build();
     }
 
     private void checkExposedHeaders(HttpHeaders headers, String target, List<Finding> findings) {

@@ -26,6 +26,9 @@ public class ScanEngine {
     private final PortScanner portScanner;
     private final EndpointScanner endpointScanner;
     private final FingerprintScanner fingerprintScanner;
+    private final CorsScanner corsScanner;
+    private final JwtScanner jwtScanner;
+    private final RedirectScanner redirectScanner;
 
     public ScanReport run(String domain) {
         log.info("========================================");
@@ -84,13 +87,19 @@ public class ScanEngine {
                 httpScanner.scan(host),
                 headerScanner.scan(host),
                 endpointScanner.scan(host),
-                fingerprintScanner.scan(host)
+                fingerprintScanner.scan(host),
+                corsScanner.scan(host),
+                jwtScanner.scan(host),
+                redirectScanner.scan(host)
         ).map(results -> {
             List<Finding> merged = new ArrayList<>();
             merged.addAll(results.getT1());
             merged.addAll(results.getT2());
             merged.addAll(results.getT3());
             merged.addAll(results.getT4());
+            merged.addAll(results.getT5());
+            merged.addAll(results.getT6());
+            merged.addAll(results.getT7());
             return merged;
         });
     }
