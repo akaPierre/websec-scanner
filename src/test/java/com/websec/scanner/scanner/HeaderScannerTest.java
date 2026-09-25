@@ -1,5 +1,6 @@
 package com.websec.scanner.scanner;
 
+import com.websec.scanner.model.Finding;
 import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
 import okhttp3.mockwebserver.MockResponse;
@@ -7,10 +8,13 @@ import okhttp3.mockwebserver.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.test.StepVerifier;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -101,6 +105,46 @@ class HeaderScannerTest {
         StepVerifier.create(scanner.scan(baseUrl()))
                 .assertNext(findings -> assertThat(findings).hasSize(6))
                 .verifyComplete();
+    }
+
+    @Test
+    void flagsSecureFlagMissingOnHttpsTarget() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE, "session=abc123; HttpOnly; SameSite=Strict");
+        List<Finding> findings = new ArrayList<>();
+
+        scanner.checkCookieFlags(headers, "https://example.com/", findings);
+
+        assertThat(findings).hasSize(1);
+        assertThat(findings.get(0).getType()).isEqualTo(FindingType.COOKIE);
+        assertThat(findings.get(0).getSeverity()).isEqualTo(Severity.MEDIUM);
+        assertThat(findings.get(0).getTitle()).contains("Secure");
+    }
+
+    @Test
+    void doesNotRequireSecureFlagOnPlainHttpTarget() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE, "session=abc123");
+        List<Finding> findings = new ArrayList<>();
+
+        scanner.checkCookieFlags(headers, "http://example.com/", findings);
+
+        assertThat(findings)
+                .extracting(Finding::getTitle)
+                .noneMatch(t -> t.contains("Secure"))
+                .anyMatch(t -> t.contains("HttpOnly"))
+                .anyMatch(t -> t.contains("SameSite"));
+    }
+
+    @Test
+    void noCookieFindingsWhenAllFlagsPresent() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add(HttpHeaders.SET_COOKIE, "session=abc123; Secure; HttpOnly; SameSite=Strict");
+        List<Finding> findings = new ArrayList<>();
+
+        scanner.checkCookieFlags(headers, "https://example.com/", findings);
+
+        assertThat(findings).isEmpty();
     }
 
     @Test
