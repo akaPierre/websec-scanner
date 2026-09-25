@@ -26,12 +26,42 @@ An educational web application vulnerability scanner.
 - ☠️ Basic subdomain takeover detection
 - 📊 JSON report + colorized terminal output
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart TD
+    A[CLI] --> B[ScanEngine]
+    B --> C["Phase 1: Subdomain discovery via DNS"]
+    C --> D["Active hosts"]
+    D --> E["Phase 2: 7 scanners per host, running concurrently<br/>(Mono.zip + flatMap)"]
+    E --> F["Phase 3: Port scan"]
+    F --> G[ReportGenerator]
+    G --> H["Colorized terminal report"]
+    G --> I["JSON report"]
+```
+
+The whole scan pipeline is built on Project Reactor and never blocks a thread waiting on I/O: every scanner returns a `Mono<List<Finding>>`, the 7 per-host scanners (headers, HTTP/SSL, endpoints, fingerprinting, CORS, JWT, open redirect) run concurrently via `Mono.zip`, and multiple hosts are scanned concurrently via `flatMap`. Genuinely blocking work — raw `Socket` connects in `PortScanner`, DNS resolution in `SubdomainScanner` — is bridged into the pipeline through `Schedulers.boundedElastic()` rather than pretending it's asynchronous.
+
+## 🎯 Design decisions
+
+- **Fully non-blocking pipeline.** No scanner calls `.block()` internally; composition happens through Reactor operators all the way up to a single `.block()` at the CLI boundary. This lets dozens of HTTP probes and DNS lookups run concurrently per scan without a thread-per-connection cost.
+- **TCP-connect port scanning, not raw sockets.** `PortScanner` uses a plain `Socket` connect against a fixed list of commonly-misconfigured ports. This needs no elevated privileges and runs identically on any OS — a deliberate trade-off against a full SYN scan's stealth and speed, which isn't the goal of an authorized, consent-based tool anyway.
+- **Every active check is observational, not exploitative.** The CORS, JWT and open-redirect checks send a single crafted request and read the response — they never follow a redirect, submit credentials, or attempt to forge a token. The scanner is meant to *find* a misconfiguration, not use it.
+- **Deliberate concurrency limits.** Per-host and per-scanner concurrency caps exist to keep the tool from hammering a target — the point is authorized reconnaissance, not a load test.
+
+## ⚠️ Known limitations
+
+- Subdomain discovery is wordlist-based (`wordlists/subdomains.txt`) — it won't find subdomains outside that list, and doesn't attempt zone transfers or certificate-transparency lookups.
+- Port scanning checks a fixed list of commonly-sensitive ports, not a full 1–65535 sweep.
+- JWT detection is passive: it only inspects tokens the server already sets in cookies, and only flags `alg: none`. It doesn't test `Authorization` headers or attempt algorithm-confusion attacks.
+- There's no authenticated scanning — every check runs as an anonymous visitor, so anything behind a login form is out of reach.
+
 ## 🧱 Stack
 
 - Java 21
 - Spring Boot 3.5.12
 - Maven
-- WebFlux (WebClient) — fully non-blocking scanner pipelines built on Project Reactor: per-host scanners run concurrently via `Mono.zip`, multiple hosts run concurrently via `flatMap`, and blocking work (DNS resolution, raw TCP sockets) is bridged in through `Schedulers.boundedElastic()`
+- WebFlux (WebClient)
 - dnsjava
 
 ## ⚙️ Prerequisites

@@ -26,12 +26,42 @@ Ferramenta educativa de análise de vulnerabilidades para aplicações web.
 - ☠️ Detecção básica de subdomain takeover
 - 📊 Relatório em JSON + terminal colorido
 
+## 🏗️ Arquitetura
+
+```mermaid
+flowchart TD
+    A[CLI] --> B[ScanEngine]
+    B --> C["Fase 1: Descoberta de subdomínios via DNS"]
+    C --> D["Hosts ativos"]
+    D --> E["Fase 2: 7 scanners por host, rodando de forma concorrente<br/>(Mono.zip + flatMap)"]
+    E --> F["Fase 3: Scan de portas"]
+    F --> G[ReportGenerator]
+    G --> H["Relatório no terminal"]
+    G --> I["Relatório em JSON"]
+```
+
+Todo o pipeline de scan é construído sobre o Project Reactor e nunca bloqueia uma thread esperando I/O: cada scanner retorna um `Mono<List<Finding>>`, os 7 scanners por host (headers, HTTP/SSL, endpoints, fingerprinting, CORS, JWT, open redirect) rodam concorrentemente via `Mono.zip`, e múltiplos hosts são escaneados concorrentemente via `flatMap`. Operações genuinamente bloqueantes — conexões `Socket` brutas no `PortScanner`, resolução DNS no `SubdomainScanner` — são conectadas ao pipeline via `Schedulers.boundedElastic()` em vez de fingir que são assíncronas.
+
+## 🎯 Decisões de design
+
+- **Pipeline totalmente não-bloqueante.** Nenhum scanner chama `.block()` internamente; a composição acontece por meio de operadores do Reactor até um único `.block()` no limite da CLI. Isso permite que dezenas de sondagens HTTP e consultas DNS rodem concorrentemente em cada scan sem o custo de uma thread por conexão.
+- **Scan de portas via TCP-connect, não sockets brutos.** O `PortScanner` usa um `Socket` comum para conectar a uma lista fixa de portas frequentemente mal configuradas. Isso não exige privilégios elevados e roda igual em qualquer sistema operacional — uma troca deliberada da furtividade e velocidade de um SYN scan completo, que de qualquer forma não é o objetivo de uma ferramenta de uso autorizado e consentido.
+- **Toda verificação ativa é observacional, não exploratória.** As verificações de CORS, JWT e open redirect enviam uma única requisição elaborada e leem a resposta — nunca seguem um redirecionamento, enviam credenciais ou tentam forjar um token. O objetivo do scanner é *encontrar* uma configuração incorreta, não explorá-la.
+- **Limites de concorrência deliberados.** Os limites de concorrência por host e por scanner existem para evitar sobrecarregar o alvo — o objetivo é reconhecimento autorizado, não um teste de carga.
+
+## ⚠️ Limitações conhecidas
+
+- A descoberta de subdomínios é baseada em wordlist (`wordlists/subdomains.txt`) — não encontra subdomínios fora dessa lista, nem tenta zone transfers ou consultas de certificate transparency.
+- O scan de portas verifica uma lista fixa de portas comumente sensíveis, não uma varredura completa de 1 a 65535.
+- A detecção de JWT é passiva: só inspeciona tokens que o servidor já define em cookies, e só sinaliza `alg: none`. Não testa headers `Authorization` nem tenta ataques de confusão de algoritmo.
+- Não há scan autenticado — todas as verificações rodam como um visitante anônimo, então qualquer coisa atrás de um formulário de login está fora de alcance.
+
 ## 🧱 Stack
 
 - Java 21
 - Spring Boot 3.5.12
 - Maven
-- WebFlux (WebClient) — pipelines de scan totalmente não-bloqueantes construídos com Project Reactor: os scanners de cada host rodam de forma concorrente via `Mono.zip`, múltiplos hosts rodam concorrentemente via `flatMap`, e operações bloqueantes (resolução DNS, sockets TCP brutos) são conectadas ao pipeline via `Schedulers.boundedElastic()`
+- WebFlux (WebClient)
 - dnsjava
 
 ## ⚙️ Pré-requisitos
