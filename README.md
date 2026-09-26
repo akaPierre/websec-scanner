@@ -55,6 +55,7 @@ The whole scan pipeline is built on Project Reactor and never blocks a thread wa
 - Port scanning checks a fixed list of commonly-sensitive ports, not a full 1–65535 sweep.
 - JWT detection is passive: it only inspects tokens the server already sets in cookies, and only flags `alg: none`. It doesn't test `Authorization` headers or attempt algorithm-confusion attacks.
 - There's no authenticated scanning — every check runs as an anonymous visitor, so anything behind a login form is out of reach.
+- `--scope`/`--rate-limit` cover host allow-listing and a global request rate, but not a per-program identifying `User-Agent` (some bounty programs require your researcher handle/contact in it) or a report exporter matching a specific platform's submission template — both would need to be added before this replaces a purpose-built bounty toolkit.
 
 ## 🧱 Stack
 
@@ -91,6 +92,18 @@ java -jar target/websec-scanner-1.0.0.jar scanme.nmap.org
 chmod +x run.sh
 ./run.sh scanme.nmap.org
 ```
+
+### Scoped scans (e.g. bug bounty programs)
+
+Direct mode accepts two extra flags, meant for scanning inside a bounty program's declared scope and rate limit rather than a single ad-hoc domain:
+
+```bash
+java -jar target/websec-scanner-1.0.0.jar example.com --scope scope.txt --rate-limit 2
+```
+
+The scope file is one rule per line — see [scope.example.txt](scope.example.txt) for a ready-to-copy template. A `!` prefix excludes a host even if another rule allows it.
+
+`--rate-limit 2` caps the scanner at 2 requests/second overall — set it to whatever the program's policy states. Without `--scope`, the tool behaves exactly as before (unrestricted to the single domain given). See [Known limitations](#-known-limitations) below for what this does *not* cover yet (per-program User-Agent, HackerOne report export).
 
 ## 🐳 Running with Docker
 

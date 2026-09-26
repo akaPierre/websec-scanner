@@ -55,6 +55,7 @@ Todo o pipeline de scan é construído sobre o Project Reactor e nunca bloqueia 
 - O scan de portas verifica uma lista fixa de portas comumente sensíveis, não uma varredura completa de 1 a 65535.
 - A detecção de JWT é passiva: só inspeciona tokens que o servidor já define em cookies, e só sinaliza `alg: none`. Não testa headers `Authorization` nem tenta ataques de confusão de algoritmo.
 - Não há scan autenticado — todas as verificações rodam como um visitante anônimo, então qualquer coisa atrás de um formulário de login está fora de alcance.
+- `--scope`/`--rate-limit` cobrem lista de hosts permitidos e um limite global de requisições, mas não um `User-Agent` identificador por programa (alguns programas de bounty exigem seu handle/contato de pesquisador nele) nem um exportador de relatório no formato de submissão de uma plataforma específica — ambos precisariam ser adicionados antes disso substituir uma ferramenta de bounty dedicada.
 
 ## 🧱 Stack
 
@@ -91,6 +92,18 @@ java -jar target/websec-scanner-1.0.0.jar scanme.nmap.org
 chmod +x run.sh
 ./run.sh scanme.nmap.org
 ```
+
+### Scans com escopo (ex.: programas de bug bounty)
+
+O modo direto aceita duas flags extras, pensadas para escanear dentro do escopo e do rate limit declarados por um programa de bounty, em vez de um único domínio avulso:
+
+```bash
+java -jar target/websec-scanner-1.0.0.jar example.com --scope scope.txt --rate-limit 2
+```
+
+O arquivo de escopo tem uma regra por linha — veja [scope.example.txt](scope.example.txt) para um modelo pronto para copiar. O prefixo `!` exclui um host mesmo que outra regra o permita.
+
+`--rate-limit 2` limita o scanner a 2 requisições/segundo no total — ajuste conforme a política do programa. Sem `--scope`, a ferramenta se comporta exatamente como antes (sem restrição, apenas o domínio informado). Veja [Limitações conhecidas](#-limitações-conhecidas) abaixo para o que isso ainda **não** cobre (User-Agent por programa, exportação de relatório para o HackerOne).
 
 ## 🐳 Executar com Docker
 
