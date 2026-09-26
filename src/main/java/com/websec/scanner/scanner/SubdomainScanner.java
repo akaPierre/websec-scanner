@@ -4,6 +4,7 @@ import com.websec.scanner.config.ScannerConfig;
 import com.websec.scanner.model.Finding;
 import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
+import com.websec.scanner.scope.ScopeChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -36,6 +37,7 @@ public class SubdomainScanner {
 
     private final WebClient webClient;
     private final ScannerConfig config;
+    private final ScopeChecker scopeChecker;
 
     private static final List<String> TAKEOVER_INDICATORS = List.of(
             "github.io",
@@ -75,6 +77,13 @@ public class SubdomainScanner {
                 .map(prefix -> prefix + "." + domain)
                 .toList());
         candidateHosts.add(domain);
+
+        int beforeScopeFilter = candidateHosts.size();
+        candidateHosts = candidateHosts.stream().filter(scopeChecker::isInScope).toList();
+        if (candidateHosts.size() != beforeScopeFilter) {
+            log.info("[{}] {} candidato(s) fora do escopo configurado foram ignorados",
+                    getName(), beforeScopeFilter - candidateHosts.size());
+        }
 
         log.info("[{}] Testando {} subdomínios para: {}", getName(), candidateHosts.size(), domain);
 

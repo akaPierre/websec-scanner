@@ -5,6 +5,7 @@ import com.websec.scanner.model.FindingType;
 import com.websec.scanner.model.Severity;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -20,18 +21,11 @@ public class HttpScanner implements Scanner {
     private final WebClient webClient;
     private final WebClient strictClient;
 
+    // The @Qualifier only matters for Spring's autowiring; tests construct
+    // this directly and can pass any second WebClient (e.g. one built with a
+    // stubbed ExchangeFunction) to avoid a real TLS handshake.
     @Autowired
-    public HttpScanner(WebClient webClient) {
-        this(webClient, WebClient.builder()
-                // No insecure trust manager here on purpose: this client is used to
-                // validate that the target's certificate is actually trustworthy.
-                .defaultHeader("User-Agent", "WebSec-Scanner/1.0")
-                .build());
-    }
-
-    // Visible for tests: lets a test point the cert-validation client at a
-    // mock server instead of performing a real TLS handshake.
-    HttpScanner(WebClient webClient, WebClient strictClient) {
+    public HttpScanner(WebClient webClient, @Qualifier("strictWebClient") WebClient strictClient) {
         this.webClient = webClient;
         this.strictClient = strictClient;
     }

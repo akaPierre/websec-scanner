@@ -4,6 +4,7 @@ import com.websec.scanner.config.ScannerConfig;
 import com.websec.scanner.engine.ScanEngine;
 import com.websec.scanner.model.ScanReport;
 import com.websec.scanner.report.ReportGenerator;
+import com.websec.scanner.scope.ScopeChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.fusesource.jansi.Ansi;
@@ -11,6 +12,10 @@ import org.fusesource.jansi.AnsiConsole;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Scanner;
 import java.util.regex.Pattern;
 
@@ -25,6 +30,7 @@ public class ScannerCLI implements CommandLineRunner {
     private final ScanEngine scanEngine;
     private final ReportGenerator reportGenerator;
     private final ScannerConfig config;
+    private final ScopeChecker scopeChecker;
 
     private static final Pattern DOMAIN_PATTERN = Pattern.compile(
             "^(?!-)([a-zA-Z0-9-]{1,63}\\.)+[a-zA-Z]{2,}$"
@@ -36,12 +42,22 @@ public class ScannerCLI implements CommandLineRunner {
         try {
             if (args.length > 0) {
                 String domain = args[0].trim().toLowerCase();
-                if (isValidDomain(domain)) {
-                    runScan(domain);
-                } else {
+                if (!applyCliOptions(args)) {
+                    return;
+                }
+
+                if (!isValidDomain(domain)) {
                     printError("Domínio inválido: " + domain);
                     printUsage();
+                    return;
                 }
+
+                if (!scopeChecker.isInScope(domain)) {
+                    printError("Domínio fora do escopo configurado: " + domain);
+                    return;
+                }
+
+                runScan(domain);
                 return;
             }
 
@@ -49,6 +65,70 @@ public class ScannerCLI implements CommandLineRunner {
 
         } finally {
             AnsiConsole.systemUninstall();
+        }
+    }
+
+    /**
+     * Parses {@code --scope <file>} and {@code --rate-limit <requests/s>}
+     * from the arguments following the domain. Returns false if a flag was
+     * malformed, in which case an error was already printed and the CLI
+     * should stop instead of running an unbounded/unscoped scan by mistake.
+     */
+    private boolean applyCliOptions(String[] args) {
+        for (int i = 1; i < args.length; i++) {
+            switch (args[i]) {
+                case "--scope" -> {
+                    if (i + 1 >= args.length) {
+                        printError("--scope requer o caminho de um arquivo.");
+                        return false;
+                    }
+                    if (!loadScopeFile(args[++i])) return false;
+                }
+                case "--rate-limit" -> {
+                    if (i + 1 >= args.length) {
+                        printError("--rate-limit requer um valor numérico (requisições/segundo).");
+                        return false;
+                    }
+                    if (!applyRateLimit(args[++i])) return false;
+                }
+                default -> {
+                    printError("Opção desconhecida: " + args[i]);
+                    printUsage();
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean loadScopeFile(String path) {
+        try {
+            List<String> patterns = Files.readAllLines(Path.of(path)).stream()
+                    .map(String::trim)
+                    .filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                    .toList();
+            config.setScopePatterns(patterns);
+            printInfo("Escopo carregado de '" + path + "' (" + patterns.size() + " regra(s)).");
+            return true;
+        } catch (IOException e) {
+            printError("Não foi possível ler o arquivo de escopo: " + path);
+            return false;
+        }
+    }
+
+    private boolean applyRateLimit(String value) {
+        try {
+            double requestsPerSecond = Double.parseDouble(value);
+            if (requestsPerSecond <= 0) {
+                printError("--rate-limit deve ser maior que zero.");
+                return false;
+            }
+            config.setMaxRequestsPerSecond(requestsPerSecond);
+            printInfo("Limite de requisições: " + requestsPerSecond + " req/s.");
+            return true;
+        } catch (NumberFormatException e) {
+            printError("Valor de --rate-limit inválido: " + value);
+            return false;
         }
     }
 
@@ -212,6 +292,13 @@ public class ScannerCLI implements CommandLineRunner {
                 "    Selecione a opção 1 e digite o domínio.\n" +
                 "\n  Modo direto (linha de comando):\n" +
                 "    java -jar websec-scanner.jar example.com\n" +
+                "\n  OPÇÕES (modo direto, ex.: bug bounty):\n" +
+                "    --scope <arquivo>     Restringe o scan aos hosts listados no arquivo.\n" +
+                "                          Uma regra por linha: 'example.com', '*.example.com'\n" +
+                "                          (subdomínios, não o domínio raiz) ou '!excluido.com'\n" +
+                "                          (fora de escopo, tem prioridade sobre inclusões).\n" +
+                "    --rate-limit <n>      Limita a n requisições/segundo (ex.: 2).\n" +
+                "                          Use o valor definido na política do programa.\n" +
                 "\n  O QUE É ANALISADO:\n" +
                 "    • Subdomínios ativos via DNS\n" +
                 "    • Headers de segurança HTTP\n" +
@@ -235,8 +322,9 @@ public class ScannerCLI implements CommandLineRunner {
 
     private void printUsage() {
         System.out.println(ansi().fg(WHITE).a(
-                "\n  Uso: java -jar websec-scanner.jar <domínio>\n" +
-                "  Ex:  java -jar websec-scanner.jar example.com\n"
+                "\n  Uso: java -jar websec-scanner.jar <domínio> [--scope <arquivo>] [--rate-limit <n>]\n" +
+                "  Ex:  java -jar websec-scanner.jar example.com\n" +
+                "       java -jar websec-scanner.jar example.com --scope scope.txt --rate-limit 2\n"
         ).reset());
     }
 

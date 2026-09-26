@@ -9,6 +9,7 @@ import io.netty.handler.timeout.WriteTimeoutHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 
@@ -18,9 +19,14 @@ import java.util.concurrent.TimeUnit;
 
 @Configuration
 public class WebClientConfig {
-    
+
     @Bean
-    public WebClient webClient(ScannerConfig config) throws SSLException {
+    public ExchangeFilterFunction rateLimiterFilter(ScannerConfig config) {
+        return new RateLimiterFilter(config);
+    }
+
+    @Bean
+    public WebClient webClient(ScannerConfig config, ExchangeFilterFunction rateLimiterFilter) throws SSLException {
 
         SslContext sslContext = SslContextBuilder
                 .forClient()
@@ -40,6 +46,18 @@ public class WebClientConfig {
         return WebClient.builder()
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .defaultHeader("User-Agent", config.getUserAgent())
+                .filter(rateLimiterFilter)
+                .build();
+    }
+
+    // Used only by HttpScanner to validate certificates: no insecure trust
+    // manager here (a real cert failure must actually surface), but it shares
+    // the same rate limiter as the main client.
+    @Bean
+    public WebClient strictWebClient(ScannerConfig config, ExchangeFilterFunction rateLimiterFilter) {
+        return WebClient.builder()
+                .defaultHeader("User-Agent", config.getUserAgent())
+                .filter(rateLimiterFilter)
                 .build();
     }
 }

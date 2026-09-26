@@ -1,0 +1,13 @@
+# Example --scope file. One rule per line.
+# Lines starting with # are comments and are ignored.
+#
+# Exact host:
+example.com
+#
+# Wildcard: matches any subdomain, NOT the apex domain above
+# (list the apex separately if it should be in scope too).
+*.example.com
+#
+# Deny rule: always wins over an allow rule for the same host,
+# even if it matches a wildcard above.
+!staging.example.com

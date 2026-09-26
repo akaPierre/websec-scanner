@@ -3,6 +3,7 @@ package com.websec.scanner.engine;
 import com.websec.scanner.model.Finding;
 import com.websec.scanner.model.ScanReport;
 import com.websec.scanner.scanner.*;
+import com.websec.scanner.scope.ScopeChecker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,7 @@ public class ScanEngine {
     private final CorsScanner corsScanner;
     private final JwtScanner jwtScanner;
     private final RedirectScanner redirectScanner;
+    private final ScopeChecker scopeChecker;
 
     public ScanReport run(String domain) {
         log.info("========================================");
@@ -43,6 +45,13 @@ public class ScanEngine {
         log.info("[Engine] FASE 1 — Descoberta de subdomínios");
         List<String> activeHosts = subdomainScanner
                 .discoverHostsWithFindings(domain, allFindings);
+
+        int beforeScopeFilter = activeHosts.size();
+        activeHosts = activeHosts.stream().filter(scopeChecker::isInScope).toList();
+        if (activeHosts.size() != beforeScopeFilter) {
+            log.warn("[Engine] {} host(s) fora do escopo configurado foram ignorados",
+                    beforeScopeFilter - activeHosts.size());
+        }
 
         log.info("[Engine] {} hosts ativos para análise", activeHosts.size());
 
